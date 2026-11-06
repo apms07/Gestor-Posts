@@ -16,61 +16,152 @@
 
   <script type="text/babel">
     const { useState, useEffect } = React;
-    const API = "https://jsonplaceholder.typicode.com/posts";
+const API = "https://jsonplaceholder.typicode.com/posts";
 
-    // Componente: uma função que devolve JSX. O nome começa sempre com maiúscula.
-    // "post" chega como prop, vinda do componente pai.
-    function CartaoPost({ post }) {
-      return (
-        <div className="card mb-3 shadow-sm">
-          <div className="card-body">
-            <h5 className="card-title text-capitalize">{post.title}</h5>
-            <p className="card-text text-muted">{post.body}</p>
-            <button className="btn btn-sm btn-outline-primary me-2">Editar</button>
-            <button className="btn btn-sm btn-outline-danger">Apagar</button>
-          </div>
-        </div>
-      );
-    }
+// Função auxiliar: todos os pedidos passam por aqui
+async function pedido(url, opcoes) {
+  const resposta = await fetch(url, opcoes);
+  if (!resposta.ok) throw new Error("Erro HTTP " + resposta.status);
+  return resposta.json();
+}
 
-    function App() {
-      // Estado: o que o componente "recorda". Mudar o estado volta a desenhar o ecrã.
-      const [posts, setPosts] = useState([]);
-      const [aCarregar, setACarregar] = useState(true);
-      const [erro, setErro] = useState(null);
+function CartaoPost({ post, aEditar, aApagar }) {
+  return (
+    <div className="card mb-3 shadow-sm">
+      <div className="card-body">
+        <h5 className="card-title text-capitalize">{post.title}</h5>
+        <p className="card-text text-muted">{post.body}</p>
+        <button className="btn btn-sm btn-outline-primary me-2"
+                onClick={() => aEditar(post)}>Editar</button>
+        <button className="btn btn-sm btn-outline-danger"
+                onClick={() => aApagar(post.id)}>Apagar</button>
+      </div>
+    </div>
+  );
+}
 
-      // Efeito: corre depois do primeiro desenho. O [] final significa "só uma vez".
-      useEffect(() => {
-        async function carregarPosts() {
-          try {
-            const resposta = await fetch(API + "?_limit=6");
-            if (!resposta.ok) throw new Error("Erro HTTP " + resposta.status);
-            setPosts(await resposta.json());
-          } catch (e) {
-            setErro(e.message);
-          } finally {
-            setACarregar(false);
-          }
-        }
-        carregarPosts();
-      }, []);
+function Formulario({ postEmEdicao, aGuardar, aCancelar }) {
+  const [titulo, setTitulo] = useState("");
+  const [corpo, setCorpo] = useState("");
 
-      return (
-        <div className="container py-4" style={{ maxWidth: 720 }}>
-          <h1 className="h3 mb-1">Gestor de Posts</h1>
-          <p className="text-muted">Aprender React, Bootstrap e APIs REST.</p>
+  // Quando se clica em "Editar", preenche os campos com esse post
+  useEffect(() => {
+    setTitulo(postEmEdicao ? postEmEdicao.title : "");
+    setCorpo(postEmEdicao ? postEmEdicao.body : "");
+  }, [postEmEdicao]);
 
-          {aCarregar && <p className="text-muted">A carregar...</p>}
-          {erro && <div className="alert alert-danger">{erro}</div>}
+  function submeter(e) {
+    e.preventDefault(); // impede o browser de recarregar a página
+    aGuardar({ title: titulo, body: corpo });
+    setTitulo("");
+    setCorpo("");
+  }
 
-          {posts.map((post) => (
-            <CartaoPost key={post.id} post={post} />
-          ))}
-        </div>
-      );
-    }
+  return (
+    <form onSubmit={submeter} className="card card-body mb-4">
+      <h5>{postEmEdicao ? "Editar post #" + postEmEdicao.id : "Novo post"}</h5>
+      <input className="form-control mb-2" placeholder="Título"
+             value={titulo} onChange={(e) => setTitulo(e.target.value)} required />
+      <textarea className="form-control mb-2" rows="3" placeholder="Conteúdo"
+                value={corpo} onChange={(e) => setCorpo(e.target.value)} required />
+      <div>
+        <button className="btn btn-primary me-2" type="submit">
+          {postEmEdicao ? "Guardar alterações" : "Criar post"}
+        </button>
+        {postEmEdicao && (
+          <button className="btn btn-secondary" type="button" onClick={aCancelar}>
+            Cancelar
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+function App() {
+  const [posts, setPosts] = useState([]);
+  const [aCarregar, setACarregar] = useState(true);
+  const [erro, setErro] = useState(null);
+  const [aviso, setAviso] = useState("");
+  const [postEmEdicao, setPostEmEdicao] = useState(null);
+
+  // GET: ler a lista (uma vez, quando a página abre)
+  useEffect(() => {
+    pedido(API + "?_limit=6")
+      .then(setPosts)
+      .catch((e) => setErro(e.message))
+      .finally(() => setACarregar(false));
+  }, []);
+
+  // POST: criar um recurso novo
+  async function criar(dados) {
+    try {
+      setErro(null);
+      const novo = await pedido(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...dados, userId: 1 }),
+      });
+      // A API devolve sempre id 101, por isso usamos um id local único
+      setPosts([{ ...novo, id: Date.now() }, ...posts]);
+      setAviso("Post criado (POST).");
+    } catch (e) { setErro(e.message); }
+  }
+
+  // PUT: atualizar um recurso existente (o id vai na URL)
+  async function atualizar(dados) {
+    try {
+      setErro(null);
+      const id = postEmEdicao.id;
+      // Posts criados localmente não existem na API, só os atualizamos no ecrã
+      const atualizado = id > 100
+        ? { ...postEmEdicao, ...dados }
+        : await pedido(API + "/" + id, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...postEmEdicao, ...dados }),
+          });
+      setPosts(posts.map((p) => (p.id === id ? atualizado : p)));
+      setPostEmEdicao(null);
+      setAviso("Post atualizado (PUT).");
+    } catch (e) { setErro(e.message); }
+  }
+
+  // DELETE: apagar um recurso
+  async function apagar(id) {
+    try {
+      setErro(null);
+      if (id <= 100) await pedido(API + "/" + id, { method: "DELETE" });
+      setPosts(posts.filter((p) => p.id !== id));
+      setAviso("Post apagado (DELETE).");
+    } catch (e) { setErro(e.message); }
+  }
+
+  return (
+    <div className="container py-4" style={{ maxWidth: 720 }}>
+      <h1 className="h3 mb-1">Gestor de Posts</h1>
+      <p className="text-muted">Aprender React, Bootstrap e APIs REST.</p>
+
+      {erro && <div className="alert alert-danger">{erro}</div>}
+      {aviso && <div className="alert alert-success py-2">{aviso}</div>}
+
+      <Formulario
+        postEmEdicao={postEmEdicao}
+        aGuardar={postEmEdicao ? atualizar : criar}
+        aCancelar={() => setPostEmEdicao(null)}
+      />
+
+      {aCarregar && <p className="text-muted">A carregar...</p>}
+
+      {posts.map((post) => (
+        <CartaoPost key={post.id} post={post}
+                    aEditar={setPostEmEdicao} aApagar={apagar} />
+      ))}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
 </html>
